@@ -3,6 +3,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
     <PackageId>VirtualWebDav</PackageId>
     <Version>0.1.0</Version>
     <Description>Embedded loopback WebDAV for provider-backed virtual file systems.</Description>

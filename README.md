@@ -12,7 +12,15 @@ Install a .NET 8 SDK (or a newer SDK plus the .NET 8 ASP.NET Core runtime), then
 dotnet run --project samples/VirtualWebDav.Sample
 ```
 
-The sample serves `http://localhost:8085/`, containing `Documents/hello.txt`. Its data lives in memory and disappears on exit. Pass a different fixed port after `--`, for example `-- 8090`. Stop with Ctrl+C.
+The sample serves `http://localhost:8085/`, with two independent in-memory providers:
+
+```text
+/
+├── FolderA/Documents/hello.txt   ("Hello from FolderA!")
+└── FolderB/Documents/hello.txt   ("Hello from FolderB!")
+```
+
+Its data disappears on exit. Pass a different fixed port after `--`, for example `-- 8090`. Stop with Ctrl+C.
 
 Map an unused Windows drive letter:
 
@@ -51,7 +59,30 @@ Console.WriteLine(server.ListeningUri);
 // Disposing the server stops accepting requests and drains active requests.
 ```
 
-Implement `IVirtualFileSystem`; see the complete [in-memory sample](samples/VirtualWebDav.Sample/InMemoryFileSystem.cs). There is no registration builder: the provider represents the entire tree, and can generate folders and files dynamically.
+Derive from `CustomFileSystem`, or implement `IVirtualFileSystem` directly; both work with the existing server API. See the complete [in-memory sample](samples/VirtualWebDav.Sample/InMemoryFileSystem.cs) and [custom-provider tutorial](docs/custom-file-systems.md). A provider can generate folders and files dynamically. The base class requires just metadata lookup, enumeration, and reading; write operations are virtual and reject requests until overridden.
+
+### Mount several providers
+
+Inside your `Program.Main`, construct a composite and pass it to the server:
+
+```csharp
+var fileSystem = new CompositeFileSystem(
+    new Dictionary<string, IVirtualFileSystem>
+    {
+        ["/FolderA"] = new MyFileSystem(),
+        ["/FolderB"] = new AnotherFileSystem()
+    });
+
+await using var server = await WebDavServer.StartAsync(
+    fileSystem,
+    new WebDavServerOptions { Port = 8085 });
+```
+
+Here `MyFileSystem` and `AnotherFileSystem` are your own classes derived from `CustomFileSystem`. The composite lists mount names at `/` and translates `/FolderA/report.txt` into `/report.txt` for that provider. Mount paths are fixed, single top-level folders. Registration is copied at construction; paths match ignoring case while retaining display spelling. Nested mounts and duplicate names are rejected.
+
+Each provider must expose an existing directory at `/`; invalid roots surface as configuration errors (HTTP 500), not hidden mounts. Unknown mounts return not-found errors. The composite root and mount roots cannot be created, deleted, overwritten, copied, or moved. Mount-root custom properties still go to the provider; the synthetic root has empty, read-only custom properties.
+
+Copies and moves within a mount delegate normally. Cross-mount copies/moves return HTTP 405 without performing any transfer, even when two mounts reference the same provider instance. Providers remain caller-owned. WebDAV locks use the full external path; mounting the same mutable storage at multiple paths does not coordinate locks between aliases.
 
 | Provider operation | Responsibility |
 | --- | --- |
@@ -107,7 +138,7 @@ dotnet test VirtualWebDav.sln -c Release
 dotnet pack src/VirtualWebDav/VirtualWebDav.csproj -c Release --no-build -o artifacts
 
 # Opt-in mapped-drive test, with the sample already running:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-WindowsDrive.ps1
+powershell.exe -NoProfile -File scripts/Test-WindowsDrive.ps1 -WritableSubfolder FolderA -OtherSubfolder FolderB
 ```
 
-The Windows script uses an unused drive letter, creates a unique test folder, verifies operations and reconnects, then cleans up its folder and mapping. It does not change service startup settings or the registry. CI runs protocol tests on Windows and Linux using .NET 8 and produces a NuGet artifact. See [validation results](docs/validation.md) for local acceptance evidence.
+The Windows script uses an unused drive letter, creates a unique test folder inside the selected writable subfolder, verifies operations and reconnects, then cleans up its folder and mapping. The optional other subfolder is checked for independent access and unchanged listings. Omit both subfolder arguments when testing a single writable provider at `/`. Subfolder arguments accept single names containing letters, digits, underscores, or hyphens. The script does not change service startup settings or registry configuration and restores the network-mapping persistence preference. CI runs protocol tests on Windows and Linux using .NET 8 and produces a NuGet artifact. See [validation results](docs/validation.md) for local acceptance evidence.

@@ -2,7 +2,26 @@
 
 Validated on 2026-09-25 using Windows 11 Pro, build 26200.
 
-## Automated tests
+## Composite filesystem and custom-provider update
+
+The expanded suite passes **32 tests, zero failures**, including a Release build/test with the locally installed .NET SDK 8.0.404. The updated NuGet package builds successfully and includes XML API documentation.
+
+New tests cover the `CustomFileSystem` read-only defaults and cancellation; mount registration validation and immutability; case-preserving root metadata; prefix-boundary isolation; provider-relative routing for every operation; invalid provider roots; unchanged exception/stream/session ownership; aborted writes; protected roots; and cross-mount rejection before provider callbacks, including two mounts of the same provider instance. HTTP tests exercise independent mounts, read-only subclasses, mounted-path locks, and same-mount copy/move.
+
+The two-provider Release sample was verified through a real Windows mapped drive at port 8098:
+
+```powershell
+powershell.exe -NoProfile -File scripts/Test-WindowsDrive.ps1 -Port 8098 -WritableSubfolder FolderA -OtherSubfolder FolderB
+```
+
+```text
+PASS: FolderB remains independently accessible and unchanged.
+PASS: map, enumerate, copy in/out, read, edit, copy, rename, move, temporary-file save, disconnect/reconnect, recursive delete.
+```
+
+Both mounted greeting files were also read independently and returned their distinct FolderA/FolderB content. Test folders and the mapping were removed, the original mapping preference was restored, and the sample process was stopped. Earlier CI results below apply to the initial implementation, not this local update.
+
+## Initial implementation: automated tests
 
 `dotnet test VirtualWebDav.sln -c Release --no-restore` passed: **19 tests, zero failures**. The first pass used SDK 10.0.401 targeting `net8.0`, and executed with the installed .NET / ASP.NET Core 8.0.31 runtime.
 

@@ -2,12 +2,11 @@ using System.Xml.Linq;
 
 namespace VirtualWebDav;
 
-public sealed record VirtualEntry(string Name, bool IsDirectory, long Length,
-    DateTimeOffset Created, DateTimeOffset Modified, string ETag);
-
+public sealed record VirtualEntry(string Name, bool IsDirectory, long Length, DateTimeOffset Created, DateTimeOffset Modified, string ETag);
 public interface IVirtualWriteSession : IAsyncDisposable
 {
     Stream Stream { get; }
+
     Task CommitAsync(CancellationToken cancellationToken);
 }
 
@@ -25,7 +24,15 @@ public interface IVirtualFileSystem
     Task PatchPropertiesAsync(string path, IReadOnlyList<XElement> set, IReadOnlyList<XName> remove, CancellationToken cancellationToken);
 }
 
-public enum FileSystemError { NotFound, Forbidden, Conflict, AlreadyExists, InsufficientStorage, NotSupported }
+public enum FileSystemError
+{
+    NotFound,
+    Forbidden,
+    Conflict,
+    AlreadyExists,
+    InsufficientStorage,
+    NotSupported
+}
 
 public sealed class VirtualFileSystemException(FileSystemError error) : Exception(error.ToString())
 {
@@ -43,22 +50,35 @@ public static class VirtualPath
 {
     public static string Normalize(string path)
     {
-        if (!path.StartsWith('/') || path.Contains('\\') || path.Contains('\0')) throw new ArgumentException("Invalid virtual path.");
-        if (path == "/") return path;
-        var segments = (path.EndsWith('/') ? path[..^1] : path).Split('/').Skip(1).ToArray();
-        foreach (var s in segments)
+        if (!path.StartsWith('/') || path.Contains('\\') || path.Contains('\0'))
         {
-            if (s.Length == 0 || s is "." or ".." || s.EndsWith(' ') || s.EndsWith('.') ||
-                s.Any(c => c < 32 || "<>:\"|?*".Contains(c))) throw new ArgumentException("Invalid virtual path.");
-            var stem = s.Split('.')[0].ToUpperInvariant();
-            if (stem is "CON" or "PRN" or "AUX" or "NUL" ||
-                (stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && stem[3] is >= '1' and <= '9'))
-                throw new ArgumentException("Reserved Windows name.");
+            throw new ArgumentException("Invalid virtual path.");
         }
+
+        if (path == "/")
+        {
+            return path;
+        }
+
+        string[] segments = (path.EndsWith('/') ? path[..^1] : path).Split('/').Skip(1).ToArray();
+        foreach (string? s in segments)
+        {
+            if (s.Length == 0 || s is "." or ".." || s.EndsWith(' ') || s.EndsWith('.') || s.Any(c => c < 32 || "<>:\"|?*".Contains(c)))
+            {
+                throw new ArgumentException("Invalid virtual path.");
+            }
+
+            string stem = s.Split('.')[0].ToUpperInvariant();
+            if (stem is "CON" or "PRN" or "AUX" or "NUL" || (stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && stem[3] is >= '1' and <= '9'))
+            {
+                throw new ArgumentException("Reserved Windows name.");
+            }
+        }
+
         return "/" + string.Join('/', segments);
     }
+
     public static string Parent(string path) => path[..Math.Max(1, path.LastIndexOf('/'))];
-    public static bool Within(string path, string parent) => path.Equals(parent, StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWith(parent == "/" ? "/" : parent + "/", StringComparison.OrdinalIgnoreCase);
+    public static bool Within(string path, string parent) => path.Equals(parent, StringComparison.OrdinalIgnoreCase) || path.StartsWith(parent == "/" ? "/" : parent + "/", StringComparison.OrdinalIgnoreCase);
     public static string Href(string path, bool directory) => string.Join('/', path.Split('/').Select(Uri.EscapeDataString)) + (directory && path != "/" ? "/" : "");
 }

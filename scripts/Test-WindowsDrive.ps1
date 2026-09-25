@@ -1,6 +1,8 @@
 param(
     [ValidateRange(1, 65535)][int]$Port = 8085,
-    [ValidatePattern('^[D-Z]$')][string]$Drive = 'W'
+    [ValidatePattern('^[D-Z]$')][string]$Drive = 'W',
+    [ValidatePattern('^$|^[A-Za-z0-9_-]+$')][string]$WritableSubfolder = '',
+    [ValidatePattern('^$|^[A-Za-z0-9_-]+$')][string]$OtherSubfolder = ''
 )
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSEdition -eq 'Core') {
@@ -15,7 +17,9 @@ $existing = & net.exe use $driveName 2>$null
 $ErrorActionPreference = 'Stop'
 if ($LASTEXITCODE -eq 0) { throw "$driveName already has a network mapping." }
 $folderName = 'webdav-smoke-' + [guid]::NewGuid().ToString('N')
-$testRoot = $driveRoot + $folderName
+$writableRoot = $driveRoot
+if ($WritableSubfolder) { $writableRoot = [IO.Path]::Combine($driveRoot, $WritableSubfolder) }
+$testRoot = [IO.Path]::Combine($writableRoot, $folderName)
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) $folderName
 $mapped = $false
 $preferencePath = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Network\Persistent Connections'
@@ -28,6 +32,12 @@ function Connect-TestDrive {
 try {
     Connect-TestDrive
     $mapped = $true
+    if (!(Test-Path -LiteralPath $writableRoot -PathType Container)) { throw 'Writable subfolder does not exist.' }
+    if ($OtherSubfolder) {
+        if ($OtherSubfolder -eq $WritableSubfolder) { throw 'OtherSubfolder must refer to a different mount.' }
+        $otherRoot = Join-Path $driveRoot $OtherSubfolder
+        $otherBefore = @(Get-ChildItem -LiteralPath $otherRoot | Select-Object -ExpandProperty Name | Sort-Object)
+    }
     New-Item -ItemType Directory -Path $testRoot | Out-Null
     New-Item -ItemType Directory -Path $tempRoot | Out-Null
     Set-Content -LiteralPath (Join-Path $tempRoot 'input.txt') -Value 'first' -NoNewline
@@ -56,15 +66,21 @@ try {
     $mapped = $true
     if ((Get-Content -LiteralPath (Join-Path $testRoot 'hello.txt') -Raw) -ne 'saved') { throw 'Reconnect/save verification failed.' }
     if ((Get-Content -LiteralPath (Join-Path $testRoot 'nested\renamed.txt') -Raw) -ne 'edited') { throw 'Move verification failed.' }
+    if ($OtherSubfolder) {
+        $otherAfter = @(Get-ChildItem -LiteralPath $otherRoot | Select-Object -ExpandProperty Name | Sort-Object)
+        if (Compare-Object $otherBefore $otherAfter) { throw 'Other mount changed unexpectedly.' }
+        if (Test-Path -LiteralPath (Join-Path $otherRoot $folderName)) { throw 'Test directory leaked into the other mount.' }
+        Write-Output "PASS: $OtherSubfolder remains independently accessible and unchanged."
+    }
     # Verify exact, generated deletion roots before recursive cleanup.
-    if ([IO.Path]::GetFullPath($testRoot) -ne ($driveRoot + $folderName)) { throw 'Unexpected test root.' }
+    if ([IO.Path]::GetFullPath($testRoot) -ne (Join-Path $writableRoot $folderName)) { throw 'Unexpected test root.' }
     Remove-Item -LiteralPath $testRoot -Recurse -Force
     if (Test-Path -LiteralPath $testRoot) { throw 'Delete verification failed.' }
     Write-Output 'PASS: map, enumerate, copy in/out, read, edit, copy, rename, move, temporary-file save, disconnect/reconnect, recursive delete.'
 }
 finally {
     try {
-        if ($mapped -and (Test-Path -LiteralPath $testRoot) -and [IO.Path]::GetFullPath($testRoot) -eq ($driveRoot + $folderName)) {
+        if ($mapped -and (Test-Path -LiteralPath $testRoot) -and [IO.Path]::GetFullPath($testRoot) -eq (Join-Path $writableRoot $folderName)) {
                 Remove-Item -LiteralPath $testRoot -Recurse -Force
         }
     }
